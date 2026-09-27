@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sentry — Live Camera Watch</title>
+<style>
+  :root {
+    --bg:#0b0f14; --panel:#131a22; --line:#263340;
+    --text:#e7edf3; --muted:#7c8b9a; --alert:#ff7a45; --safe:#2dd4bf;
+    --mono:'SF Mono','Consolas','Menlo',monospace;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg:#eef1f4; --panel:#fff; --panel-2:#f5f7f9;
+      --line:#dde3e9; --text:#10161d; --muted:#5b6b7a;
+    }
+  }
+  :root[data-theme="dark"]{ --bg:#0b0f14; --panel:#131a22; }
+  html{ scroll-padding-top:env(safe-area-inset-top,0px); height:100%; }
+  *{ box-sizing:border-box; }
+  body{
+    height:100%; margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    display:flex; justify-content:center;
+  }
+  .app{ width:100%; max-width:480px; padding:16px 16px calc(24px + env(safe-area-inset-bottom,0px)); }
+  .status-row{ display:flex; justify-content:space-between; align-items:center; padding:10px 2px 16px; }
+  .brand{ font-weight:600; font-size:17px; }
+  .brand span{ color:var(--muted); font-weight:400; }
+  .armed-pill{
+    font-family:var(--mono); font-size:11px; padding:5px 10px; border-radius:20px;
+    border:1px solid var(--muted); color:var(--muted); display:flex; align-items:center; gap:6px;
+  }
+  .armed-pill.on{ border-color:var(--safe); color:var(--safe); }
+  .armed-pill .dot{ width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .armed-pill.on .dot{ animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%{box-shadow:0 0 0 0 rgba(45,212,191,.5);} 70%{box-shadow:0 0 0 6px rgba(45,212,191,0);} 100%{box-shadow:0 0 0 0 rgba(45,212,191,0);} }
+
+  .feed{ position:relative; background:#05080b; border-radius:14px; aspect-ratio:4/3; overflow:hidden; border:1px solid var(--line); }
+  video{ width:100%; height:100%; object-fit:cover; display:block; }
+  .feed-label{ position:absolute; top:10px; left:10px; font-family:var(--mono); font-size:11px; color:#cdd8e3; background:rgba(0,0,0,.4); padding:3px 7px; border-radius:4px; }
+  .feed-time{ position:absolute; top:10px; right:10px; font-family:var(--mono); font-size:11px; color:#cdd8e3; background:rgba(0,0,0,.4); padding:3px 7px; border-radius:4px; }
+  .feed.alerting{ border-color:var(--alert); box-shadow:0 0 0 2px rgba(255,122,69,.25); }
+  .flash{ position:absolute; inset:0; background:rgba(255,122,69,.28); opacity:0; pointer-events:none; }
+  .flash.on{ animation:flashfade .9s ease-out; }
+  @keyframes flashfade{ 0%{opacity:1;} 100%{opacity:0;} }
+  .placeholder{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:20px; }
+  .placeholder .ic{ font-size:32px; }
+  .placeholder p{ color:var(--muted); font-size:13px; margin:0; max-width:260px; }
+
+  .banner{ margin-top:14px; border-radius:12px; padding:14px 16px; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--muted); display:flex; gap:12px; align-items:flex-start; }
+  .banner.safe{ border-left-color:var(--safe); }
+  .banner.alert{ border-left-color:var(--alert); }
+  .banner .icon{ font-size:20px; line-height:1; margin-top:1px; }
+  .banner .title{ font-size:14px; font-weight:600; }
+  .banner .sub{ font-size:12.5px; color:var(--muted); margin-top:2px; }
+
+  .controls{ display:flex; gap:10px; margin-top:16px; }
+  .btn{ flex:1; padding:14px; border-radius:12px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px; font-weight:600; font-family:inherit; cursor:pointer; }
+  .btn.primary{ background:var(--safe); color:#04201c; border:none; }
+  .btn.stop{ background:var(--alert); color:#1a0e08; border:none; }
+  .btn:disabled{ opacity:.5; }
+
+  .sens{ margin-top:16px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .sens label{ font-size:12.5px; color:var(--muted); display:flex; justify-content:space-between; margin-bottom:6px; }
+  .sens input[type=range]{ width:100%; }
+
+  .log-head{ display:flex; justify-content:space-between; align-items:baseline; margin:22px 2px 8px; }
+  .log-head h2{ font-size:13px; margin:0; color:var(--muted); font-weight:600; }
+  .log-head .count{ font-family:var(--mono); font-size:12px; color:var(--muted); }
+  .log-item{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:11px 13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+  .log-item .lt{ font-size:13.5px; } .log-item .lt .badge{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--alert); margin-right:8px; }
+  .log-item .ts{ font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .empty{ text-align:center; color:var(--muted); font-size:13px; padding:22px 10px; border:1px dashed var(--line); border-radius:10px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="status-row">
+    <div class="brand">Sentry <span>· Live Watch</span></div>
+    <div class="armed-pill" id="armedPill"><span class="dot"></span><span id="armedText">OFF</span></div>
+  </div>
+
+  <div class="feed" id="feed">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="placeholder" id="placeholder">
+      <div class="ic">📷</div>
+      <p>Tap "Start watching" to enable your camera and begin motion detection.</p>
+    </div>
+    <div class="flash" id="flash"></div>
+    <div class="feed-label" id="feedLabel" style="display:none">LIVE</div>
+    <div class="feed-time" id="clock" style="display:none">--:--:--</div>
+  </div>
+  <canvas id="proc" style="display:none"></canvas>
+
+  <div class="banner" id="banner">
+    <div class="icon" id="bannerIcon">💤</div>
+    <div>
+      <div class="title" id="bannerTitle">Not watching</div>
+      <div class="sub" id="bannerSub">Start the camera to begin monitoring for movement.</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" id="startBtn">Start watching</button>
+    <button class="btn stop" id="stopBtn" style="display:none">Stop</button>
+    <button class="btn" id="flipBtn" style="display:none">Flip camera</button>
+  </div>
+
+  <div class="sens">
+    <label><span>Sensitivity</span><span id="sensVal">Medium</span></label>
+    <input type="range" id="sensSlider" min="1" max="3" value="2" step="1">
+  </div>
+
+  <div class="log-head">
+    <h2>EVENT LOG</h2>
+    <span class="count" id="logCount">0 events</span>
+  </div>
+  <div id="logList">
+    <div class="empty" id="emptyState">No events yet — start watching to detect movement.</div>
+  </div>
+
+</div>
+
+<script>
+  const video = document.getElementById('video');
+  const feed = document.getElementById('feed');
+  const placeholder = document.getElementById('placeholder');
+  const flash = document.getElementById('flash');
+  const feedLabel = document.getElementById('feedLabel');
+  const clockEl = document.getElementById('clock');
+  const banner = document.getElementById('banner');
+  const bannerIcon = document.getElementById('bannerIcon');
+  const bannerTitle = document.getElementById('bannerTitle');
+  const bannerSub = document.getElementById('bannerSub');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const flipBtn = document.getElementById('flipBtn');
+  const armedPill = document.getElementById('armedPill');
+  const armedText = document.getElementById('armedText');
+  const sensSlider = document.getElementById('sensSlider');
+  const sensVal = document.getElementById('sensVal');
+  const logList = document.getElementById('logList');
+  const logCount = document.getElementById('logCount');
+  const emptyState = document.getElementById('emptyState');
+  const proc = document.getElementById('proc');
+  const pctx = proc.getContext('2d', { willReadFrequently: true });
+
+  const W = 80, H = 60; // downsampled analysis size
+  proc.width = W; proc.height = H;
+
+  let stream = null;
+  let facing = 'environment';
+  let prevFrame = null;
+  let watching = false;
+  let events = 0;
+  let cooldownUntil = 0;
+  let rafId = null;
+
+  const sensLabels = { 1: 'Low', 2: 'Medium', 3: 'High' };
+  const sensThresholds = { 1: 45, 2: 28, 3: 16 }; // lower = more sensitive
+
+  sensSlider.addEventListener('input', () => {
+    sensVal.textContent = sensLabels[sensSlider.value];
+  });
+
+  function tickClock() {
+    clockEl.textContent = new Date().toLocaleTimeString([], { hour12: false });
+  }
+  setInterval(tickClock, 1000);
+
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing }, audio: false
+      });
+      video.srcObject = stream;
+      placeholder.style.display = 'none';
+      feedLabel.style.display = 'block';
+      clockEl.style.display = 'block';
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'block';
+      flipBtn.style.display = 'block';
+      armedPill.classList.add('on');
+      armedText.textContent = 'WATCHING';
+      bannerIcon.textContent = '🛡️';
+      bannerTitle.textContent = 'All quiet';
+      bannerSub.textContent = 'Watching for movement outside.';
+      banner.className = 'banner safe';
+      watching = true;
+      prevFrame = null;
+      loop();
+    } catch (err) {
+      bannerIcon.textContent = '⚠️';
+      bannerTitle.textContent = 'Camera unavailable';
+      bannerSub.textContent = 'Check that camera access is allowed for this page, then try again.';
+      banner.className = 'banner alert';
+    }
+  }
+
+  function stopCamera() {
+    watching = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    placeholder.style.display = 'flex';
+    feedLabel.style.display = 'none';
+    clockEl.style.display = 'none';
+    startBtn.style.display = 'block';
+    stopBtn.style.display = 'none';
+    flipBtn.style.display = 'none';
+    armedPill.classList.remove('on');
+    armedText.textContent = 'OFF';
+    bannerIcon.textContent = '💤';
+    bannerTitle.textContent = 'Not watching';
+    bannerSub.textContent = 'Start the camera to begin monitoring for movement.';
+    banner.className = 'banner';
+  }
+
+  async function flipCamera() {
+    facing = facing === 'environment' ? 'user' : 'environment';
+    stopCamera();
+    await startCamera();
+  }
+
+  function beep() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ac = new AC();
+      [880, 660].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        osc.type = 'square'; osc.frequency.value = freq;
+        osc.connect(gain); gain.connect(ac.destination);
+        const t0 = ac.currentTime + i * 0.16;
+        gain.gain.setValueAtTime(0.06, t0);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+        osc.start(t0); osc.stop(t0 + 0.15);
+      });
+    } catch (e) {}
+  }
+
+  function addLogEntry() {
+    events++;
+    emptyState.style.display = 'none';
+    const now = new Date();
+    const item = document.createElement('div');
+    item.className = 'log-item';
+    item.innerHTML = `<div class="lt"><span class="badge"></span>Movement detected outside</div>
+      <div class="ts">${now.toLocaleTimeString([], { hour12: false })}</div>`;
+    logList.insertBefore(item, logList.firstChild);
+    logCount.textContent = events + (events === 1 ? ' event' : ' events');
+  }
+
+  function onMotionDetected() {
+    const now = Date.now();
+    if (now < cooldownUntil) return;
+    cooldownUntil = now + 4000;
+
+    feed.classList.add('alerting');
+    banner.className = 'banner alert';
+    bannerIcon.textContent = '🚨';
+    bannerTitle.textContent = 'Movement detected';
+    bannerSub.textContent = 'Something moved outside — ' + new Date().toLocaleTimeString([], { hour12: false });
+    flash.classList.remove('on'); void flash.offsetWidth; flash.classList.add('on');
+    beep();
+    if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+    addLogEntry();
+
+    setTimeout(() => {
+      if (!watching) return;
+      feed.classList.remove('alerting');
+      banner.className = 'banner safe';
+      bannerIcon.textContent = '🛡️';
+      bannerTitle.textContent = 'All quiet';
+      bannerSub.textContent = 'Watching for movement outside.';
+    }, 3500);
+  }
+
+  function loop() {
+    if (!watching) return;
+    if (video.readyState >= 2) {
+      pctx.drawImage(video, 0, 0, W, H);
+      const frame = pctx.getImageData(0, 0, W, H).data;
+      if (prevFrame) {
+        let diffCount = 0;
+        for (let i = 0; i < frame.length; i += 4) {
+          const dr = Math.abs(frame[i] - prevFrame[i]);
+          const dg = Math.abs(frame[i+1] - prevFrame[i+1]);
+          const db = Math.abs(frame[i+2] - prevFrame[i+2]);
+          if ((dr + dg + db) / 3 > 25) diffCount++;
+        }
+        const threshold = sensThresholds[sensSlider.value];
+        if (diffCount > threshold) onMotionDetected();
+      }
+      prevFrame = frame;
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
+  flipBtn.addEventListener('click', flipCamera);
+</script>
+</body>
+</html>
